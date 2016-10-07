@@ -240,31 +240,36 @@ def process_boxcar_data(data, pid):
     """ Returns DataFrame of parsed data for specified packet id,
         parsed according to appropriate packet format for that pid
     """
-    process_list = {
-        '0x402': packet_formats.EVR_PACKET_DEF,
-        '0x403': packet_formats.PCU_PACKET_DEF,
-        '0x406': packet_formats.MCB_PACKET_DEF,
-        '0x407': packet_formats.MCB_PACKET_DEF,
-        '0x409': packet_formats.IV_PACKET_DEF  # only [170000:] useful
-    }
+    pformat = getattr(packet_formats, packet_formats.packet_format_map[pid])
 
-    return process_boxcar_df(data, pid, process_list[pid])
+    return process_boxcar_df(data, pid, pformat)
 
 
 # DEMO FUNCTIONS
 
-def load_mcb_w_evr():
+def parse_list(packets):
     bc_data = load_ort_boxcar_data()
 
-    print 'Load EVR Data.'
-    evr_df = process_boxcar_data(bc_data, '0x402')
-    print 'Load MCB2 Data'
-    mcb_df = process_boxcar_data(bc_data, '0x407')
+    for pid in packets:
+        print 'Parsing Packet Id: {}'.format(pid)
+
+        parsed_df = process_boxcar_data(bc_data, pid)
+        parsed_df.to_csv('export/{}_parsed.csv'.format(pid))
+
+
+def parse_all_data():
+    parse_list(packet_formats.packet_format_map.keys())
+
+
+def add_evr_to_csv(pid):
+
+    df = pd.read_csv('export/{}_parsed.csv'.format(pid), index_col=0)
+    evr_df = pd.read_csv('export/0x402_parsed.csv', index_col=0)
 
     # specify order of columns (and drop anything not wanted)
-    cols = mcb_df.columns.insert(1, 'ascii_data')
+    cols = df.columns.insert(1, 'ascii_data')
 
-    df = pd.concat([mcb_df, evr_df]) \
+    new_df = pd.concat([df, evr_df]) \
         .sort_values(by='datetime').reset_index(drop=True)
 
-    return df[cols]
+    new_df[cols].to_csv('export/{}_parsed_w_evr.csv'.format(pid))
