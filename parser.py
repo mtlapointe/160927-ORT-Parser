@@ -18,8 +18,9 @@ RAWDATA_DIR = os.path.abspath(
 
 
 def read_boxcar_file(*fnames):
-    """Read and clean-up data from specified Boxcar file.
-    Returns list of [timestamp, packet id, packet hex string]"""
+    """ Read and clean-up data from specified Boxcar file.
+        Returns list of [timestamp, packet id, packet hex string]
+    """
     data = []
 
     print 'Loading Boxcar Data.'
@@ -54,7 +55,7 @@ def read_boxcar_file(*fnames):
 
 def filter_boxcar_data(data, packet_list):
     """ Filter boxcar data for only packet IDs listed.
-    Returns filtered data.
+        Returns filtered data.
     """
     filtered_data = []
 
@@ -71,8 +72,8 @@ def filter_boxcar_data(data, packet_list):
 
 def parse_packet_str(packet_str, packet_format):
     """ Parses packet hex string into list according to specified
-    format definition.
-    Returns list with parsed information.
+        format definition.
+        Returns list with parsed information.
     """
     packet_bs = bitstring.ConstBitStream('0x' + packet_str)
     packet_parsed = []
@@ -93,9 +94,9 @@ def parse_packet_str(packet_str, packet_format):
 
 
 def parse_packet_list(packets, packet_format):
-    """ Takes a list of packets from box car file and parses them to
-    specified format definition.
-    Returns list of [timestamp, parsed data...] including header row.
+    """ Takes a list of packets in boxcar format and parses them to
+        specified format definition.
+        Returns list of [timestamp, parsed data...] including header row.
     """
     parsed_data = []
 
@@ -114,9 +115,30 @@ def parse_packet_list(packets, packet_format):
         pbar.update(i+1)
 
     pbar.finish()
-    print 'Parsing Data Complete.'
+    print 'Parsing Data Complete. Lines Parsed: {}'.format(i)
 
     return parsed_data
+
+
+def process_boxcar_df(boxcar_df, pid, pformat):
+    """ Parse DataFrame of Boxcar data into a new DataFrame.
+        Takes packet id (pid) as hex string or list of strings
+        and parses according to packet format (pformat)
+        Returns parsed data frame
+    """
+    pid = get_iter_str_list(pid)
+
+    # filter only specified packets
+    # unpack to list of lists for parsing
+    # sorta a hack job - maybe make this more efficient
+
+    filtered_list = \
+        boxcar_df[boxcar_df['pid'].isin(pid)].values.tolist()
+
+    data = parse_packet_list(filtered_list, pformat)
+
+    # data has header info in top row
+    return pd.DataFrame(data[1:], columns=data[0])
 
 
 def output_to_csv(data, outfile='output.csv'):
@@ -131,7 +153,6 @@ def output_to_csv(data, outfile='output.csv'):
 
 
 # HELPER FUNCTIONS
-
 
 def half_to_float(h):
     # code from http://bit.ly/2dwmW78
@@ -178,12 +199,13 @@ def get_iterable(x):
     else:
         return (x,)
 
+
 def get_iter_str_list(x):
     # trick for py2/3 compatibility
     if 'basestring' not in globals():
-       basestring = str
+        basestring = str
     if isinstance(x, basestring):
-       return [x]
+        return [x]
     return x
 
 
@@ -196,8 +218,11 @@ def get_file_len(fname):
 
 # SCRIPT FUNCTIONS
 
-
-def load_ort_data():
+def load_ort_boxcar_data():
+    """ Returns DataFrame with all boxcar data from ORT test with timestamp,
+        packet id, and packet hex string (aka boxcar format)
+        Header:  datetime, pid, packet_str
+    """
     file_list = (
         'rawdata/20160927_1218_1330_ROSA_ORT_DATA.dat',
         'rawdata/20160927_1330_1430_ROSA_ORT_DATA.dat',
@@ -211,76 +236,35 @@ def load_ort_data():
     return pd.DataFrame(data, columns=['datetime', 'pid', 'packet_str'])
 
 
-def process_packet(boxcar_df, pid, pformat):
+def process_boxcar_data(data, pid):
+    """ Returns DataFrame of parsed data for specified packet id,
+        parsed according to appropriate packet format for that pid
+    """
+    process_list = {
+        '0x402': packet_formats.EVR_PACKET_DEF,
+        '0x403': packet_formats.PCU_PACKET_DEF,
+        '0x406': packet_formats.MCB_PACKET_DEF,
+        '0x407': packet_formats.MCB_PACKET_DEF,
+        '0x409': packet_formats.IV_PACKET_DEF  # only [170000:] useful
+    }
 
-    pid = get_iter_str_list(pid)
-
-    # filter only specified packets
-    # unpack to list of lists for parsing
-    # sorta a hack job - maybe make this more efficient
-
-    filtered_list = \
-        boxcar_df[boxcar_df['pid'].isin(pid)].values.tolist()
-
-    data = parse_packet_list(filtered_list, pformat)
-
-    # data has header info in top row
-    return pd.DataFrame(data[1:], columns=data[0])
+    return process_boxcar_df(data, pid, process_list[pid])
 
 
+# DEMO FUNCTIONS
 
-def process_mcb2_data(rawdata):
+def load_mcb_w_evr():
+    bc_data = load_ort_boxcar_data()
 
-    rows = filter_boxcar_data(all_data, '0x407')
-    data = parse_packet_list(rows, packet_formats.MCB_PACKET_DEF)
+    print 'Load EVR Data.'
+    evr_df = process_boxcar_data(bc_data, '0x402')
+    print 'Load MCB2 Data'
+    mcb_df = process_boxcar_data(bc_data, '0x407')
 
-    output_to_csv(data, 'mcb2_data.csv')
+    # specify order of columns (and drop anything not wanted)
+    cols = mcb_df.columns.insert(1, 'ascii_data')
 
+    df = pd.concat([mcb_df, evr_df]) \
+        .sort_values(by='datetime').reset_index(drop=True)
 
-def process_pcu_data():
-
-    all_data = read_boxcar_file('rawdata/ROSA_Boxcar.txt')
-
-    rows = filter_boxcar_data(all_data, '0x403')
-    data = parse_packet_list(rows, packet_formats.PCU_PACKET_DEF)
-
-    output_to_csv(data, 'pcu_data.csv')
-
-
-
-def process_evr_data():
-
-    all_data = read_boxcar_file('rawdata/ROSA_Boxcar.txt')
-
-    rows = filter_boxcar_data(all_data, '0x402')
-    data = parse_packet_list(rows, packet_formats.EVR_PACKET_DEF)
-
-    output_to_csv(data, 'evr_data.csv')
-
-
-def process_iv_data():
-
-    all_data = read_boxcar_file('rawdata/ROSA_Boxcar.txt')
-
-    rows = filter_boxcar_data(all_data, '0x409')[170000:]
-    data = parse_packet_list(rows, packet_formats.IV_PACKET_DEF)
-
-    output_to_csv(data, 'iv_data.csv')
-
-
-def mcb_dataframe():
-
-    all_data = read_boxcar_file('rawdata/ROSA_Boxcar.txt')
-
-    rows = filter_boxcar_data(all_data, '0x407')
-    mcb_data = parse_packet_list(rows, packet_formats.MCB_PACKET_DEF)
-
-    rows = filter_boxcar_data(all_data, '0x402')
-    evr_data = parse_packet_list(rows, packet_formats.EVR_PACKET_DEF)
-
-    mcb_df = pd.DataFrame(mcb_data[1:], columns=mcb_data[0])
-    evr_df = pd.DataFrame(evr_data[1:], columns=evr_data[0])
-
-    return pd.concat([mcb_df, evr_df]).sort(columns='datetime')
-
-
+    return df[cols]
