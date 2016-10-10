@@ -6,9 +6,7 @@ import progressbar
 import os
 import binascii
 import pandas as pd
-
 import packet_formats
-
 
 EXPORT_DIR = os.path.abspath(
     os.path.join(os.path.dirname('__file__'), 'export'))
@@ -85,6 +83,17 @@ def parse_packet_str(packet_str, packet_format):
             val = struct.unpack('f', float_str)[0]
         elif param_type == 'text:352':
             val = text_from_bits(packet_bs.read('bin:352'))
+        elif param_type == 'motpos':
+            x1 = packet_bs.read(2)  # trash bits
+            x1 = packet_bs.read(6)
+            x2 = packet_bs.read(8)  # trash bits
+            x2 = packet_bs.read(16)
+            val = (x1+x2).int
+        elif param_type == 'motspd':
+            x = packet_bs.read(16)
+            x = packet_bs.read(8)
+            val = (x >> 2).int
+            x = packet_bs.read(8)
         else:
             val = packet_bs.read(param_type)
 
@@ -214,62 +223,3 @@ def get_file_len(fname):
         for i, l in enumerate(f):
             pass
     return i + 1
-
-
-# SCRIPT FUNCTIONS
-
-def load_ort_boxcar_data():
-    """ Returns DataFrame with all boxcar data from ORT test with timestamp,
-        packet id, and packet hex string (aka boxcar format)
-        Header:  datetime, pid, packet_str
-    """
-    file_list = (
-        'rawdata/20160927_1218_1330_ROSA_ORT_DATA.dat',
-        'rawdata/20160927_1330_1430_ROSA_ORT_DATA.dat',
-        'rawdata/20160927_1430_1530_ROSA_ORT_DATA.dat',
-        'rawdata/20160927_1530_1630_ROSA_ORT_DATA.dat',
-        'rawdata/20160927_1630_1730_ROSA_ORT_DATA.dat',
-        'rawdata/20160927_1730_1831_ROSA_ORT_DATA.dat')
-
-    data = read_boxcar_file(*file_list)
-
-    return pd.DataFrame(data, columns=['datetime', 'pid', 'packet_str'])
-
-
-def process_boxcar_data(data, pid):
-    """ Returns DataFrame of parsed data for specified packet id,
-        parsed according to appropriate packet format for that pid
-    """
-    pformat = getattr(packet_formats, packet_formats.packet_format_map[pid])
-
-    return process_boxcar_df(data, pid, pformat)
-
-
-# DEMO FUNCTIONS
-
-def parse_list(packets):
-    bc_data = load_ort_boxcar_data()
-
-    for pid in packets:
-        print 'Parsing Packet Id: {}'.format(pid)
-
-        parsed_df = process_boxcar_data(bc_data, pid)
-        parsed_df.to_csv('export/{}_parsed.csv'.format(pid))
-
-
-def parse_all_data():
-    parse_list(packet_formats.packet_format_map.keys())
-
-
-def add_evr_to_csv(pid):
-
-    df = pd.read_csv('export/{}_parsed.csv'.format(pid), index_col=0)
-    evr_df = pd.read_csv('export/0x402_parsed.csv', index_col=0)
-
-    # specify order of columns (and drop anything not wanted)
-    cols = df.columns.insert(1, 'ascii_data')
-
-    new_df = pd.concat([df, evr_df]) \
-        .sort_values(by='datetime').reset_index(drop=True)
-
-    new_df[cols].to_csv('export/{}_parsed_w_evr.csv'.format(pid))
